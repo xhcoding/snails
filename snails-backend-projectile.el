@@ -85,6 +85,9 @@
 
 ;;; Code:
 
+(defvar snails-backend-projectile-cache-candidates nil
+  "Cache projectile files.")
+
 (defun snails-backend-projectile-project-root ()
   "Find projectile root."
   (projectile-project-root (snails-start-buffer-dir)))
@@ -94,7 +97,9 @@
   (when (featurep 'projectile)
     (let ((project-root (snails-backend-projectile-project-root)))
       (when project-root
-        (projectile-project-files project-root)))))
+        (setq snails-backend-projectile-cache-candidates (projectile-project-files project-root))
+        snails-backend-projectile-cache-candidates))))
+
 
 (snails-create-sync-backend
  :name
@@ -102,16 +107,19 @@
 
  :candidate-filter
  (lambda (input)
-   (let ((candidates)
+   (let (candidates
          (project-root (snails-backend-projectile-project-root))
-         (project-files (snails-backend-projectile-candidates)))
+         (project-files (if snails-backend-projectile-cache-candidates
+                            snails-backend-projectile-cache-candidates
+                          (snails-backend-projectile-candidates))))
      (when project-files
        (dolist (file project-files)
-         (when (or
-                (string-equal input "")
-                (snails-match-input-p input file))
-           (setq file-path (expand-file-name file project-root))
-           (snails-add-candiate 'candidates file file-path))))
+         (let (file-path)
+           (when (or
+                  (string-equal input "")
+                  (snails-match-input-p input file))
+             (setq file-path (expand-file-name file project-root))
+             (snails-add-candiate 'candidates file file-path)))))
      (snails-sort-candidates input candidates 1 1)))
 
  :candidate-icon
@@ -120,6 +128,7 @@
 
  :candidate-do
  (lambda (candidate)
+   (setq snails-backend-projectile-cache-candidates nil)
    (find-file candidate)))
 
 (provide 'snails-backend-projectile)
