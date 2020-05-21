@@ -84,6 +84,46 @@
 
 ;;; Code:
 
+;; https://www.emacswiki.org/emacs/EshellPrompt
+(defun snails-backend-rg-fish-path (path)
+  "Return a potentially trimmed-down version of the directory PATH,
+replacing parent directories with their initial characters to try to get the character
+length of PATH (sans directory slashes) down to MAX-LEN."
+  (let* ((components (split-string (abbreviate-file-name path) "/"))
+         (max-len 10)
+         (len (+ (1- (length components))
+                 (cl-reduce '+ components :key 'length)))
+         (str ""))
+    (while (and (> len max-len)
+                (cdr components))
+      (setq str (concat str
+                        (cond ((= 0 (length (car components))) "/")
+                              ((= 1 (length (car components)))
+                               (concat (car components) "/"))
+                              (t
+                               (if (string= "."
+                                            (string (elt (car components) 0)))
+                                   (concat (substring (car components) 0 2)
+                                           "/")
+                                 (string (elt (car components) 0) ?/)))))
+            len (- len (1- (length (car components))))
+            components (cdr components)))
+    (concat str (cl-reduce (lambda (a b) (concat a "/" b)) components))))
+
+(defun snails-backend-rg-slash(path)
+  "Convert windows PATH to posix PATH."
+  (with-temp-buffer
+    (insert path)
+    (goto-char (point-min))
+    (while (search-forward "\\" nil t)
+      (replace-match "/"))
+    (buffer-string)))
+
+(defun snails-backend-rg-name(candidate)
+  "CANDIDATE name."
+  (setcar candidate (snails-backend-rg-fish-path (snails-backend-rg-slash (nth 0 candidate))))
+  (mapconcat 'concat candidate ":"))
+
 (snails-create-async-backend
  :name
  "RG"
@@ -102,7 +142,8 @@
 
        (when (memq system-type '(cygwin windows-nt ms-dos))
          (setq search-input (encode-coding-string search-input locale-coding-system))
-         (setq search-dir (encode-coding-string search-dir locale-coding-system)))
+         (setq search-dir (encode-coding-string search-dir locale-coding-system))
+         )
 
        ;; Search.
        (when search-dir
@@ -113,27 +154,33 @@
  (lambda (candidate-list)
    (let (candidates)
      (dolist (candidate candidate-list)
-       (snails-add-candiate 'candidates candidate candidate))
+       (let (content
+             candidate-content)
+         (save-match-data
+           (and (string-match "^\\(.+?\\):\\([0-9]+?\\):\\([0-9]+?\\):\\(.+?\\)$" candidate)
+                (setq content `(
+                                ,(match-string 1 candidate)
+                                ,(match-string 2 candidate)
+                                ,(match-string 3 candidate)
+                                ,(match-string 4 candidate)
+                                ))))
+         (setq candidate-content (mapconcat 'concat content "?"))
+         (snails-add-candiate 'candidates (snails-backend-rg-name content)  candidate-content)))
      candidates))
 
  :candidate-icon
  (lambda (candidate)
-   (snails-render-search-file-icon
-    (nth 0 (split-string candidate ":"))
-    (string-remove-prefix (or snails-project-root-dir "") candidate)))
+   (snails-render-file-icon (nth 0 (split-string candidate ":"))))
 
  :candidate-do
  (lambda (candidate)
-   (let ((file-info (split-string candidate ":")))
-     (when (> (length file-info) 3)
-       ;; Open file and jump to position.
-       (find-file (nth 0 file-info))
-       (goto-line (string-to-number (nth 1 file-info)))
-       (move-to-column (max (- (string-to-number (nth 2 file-info)) 1) 0))
-
-       ;; Flash match line.
-       (snails-flash-line)
-       ))))
+   (let ((file-info (split-string candidate "?")))
+     (find-file (nth 0 file-info))
+     (goto-line (string-to-number (nth 1 file-info)))
+     (move-to-column (max (- (string-to-number (nth 2 file-info)) 1) 0))
+     ;; Flash match line.
+     (snails-flash-line)
+     )))
 
 (provide 'snails-backend-rg)
 
